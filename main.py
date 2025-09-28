@@ -9,6 +9,7 @@ from pymongo.errors import DuplicateKeyError
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
+from typing import List
 
 # === CONFIGURATION: Your application's settings ===
 # IMPORTANT: Replace this with your actual MongoDB connection string!
@@ -24,6 +25,7 @@ db = client.link_shortener_db # Using a new database for this project
 users_collection = db.users # Collection to store user data
 # Create a unique index on the email field to prevent duplicate accounts
 users_collection.create_index("email", unique=True)
+links_collection = db.links # Collection to store link data
 
 # === SECURITY & HASHING SETUP ===
 # Sets up the password hashing scheme (bcrypt is the standard)
@@ -59,6 +61,11 @@ class Token(BaseModel):
     """The data shape of the token response after logging in."""
     access_token: str
     token_type: str
+class Link(BaseModel):
+    """The data shape for a link object."""
+    original_url: str
+    short_code: str
+    clicks: int = 0
 
 # === AUTHENTICATION DEPENDENCY ===
 # A function that protected endpoints will depend on to get the current user
@@ -116,3 +123,30 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     # If successful, create a new access token
     access_token = create_access_token(data={"sub": user["email"]})
     return {"access_token": access_token, "token_type": "bearer"}
+
+# Add these two endpoints to your main.py file
+
+@app.get("/links", response_model=List[Link])
+def get_user_links(current_user: dict = Depends(get_current_user)):
+    """
+    Retrieves all links created by the currently authenticated user.
+    """
+    links_cursor = links_collection.find(
+        {"owner_email": current_user["email"]}, # Filter: Only find links where the owner is the current user.
+        {"_id": 0, "owner_email": 0} # Projection: Clean up the output to match the Link model.
+    )
+    return list(links_cursor)
+
+@app.delete("/links/{short_code}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_link(short_code: str, current_user: dict = Depends(get_current_user)):
+    """
+    Deletes a link, but only if the requester is the owner.
+    """
+    # This is the AUTHORIZATION check. We're verifying the user is allowed to do this.
+    link = links_collection.find_one({"short_code": short_code, "owner_email": current_user["email"]})
+
+    if not link:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link not found or you don't have permission to delete it")
+
+    links_collection.delete_one({"short_code": short_code})
+    return # A 204 response has no body, so we return nothing.
