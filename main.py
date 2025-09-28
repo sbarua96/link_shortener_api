@@ -209,3 +209,19 @@ def get_my_link_stats(current_user: dict = Depends(get_current_user)):
     if not stats:
         return {"total_links": 0, "total_clicks": 0}
     return stats[0]
+
+@app.get("/stats/my-links")
+def get_my_link_stats(current_user: dict = Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"owner_email": current_user["email"]}},
+        {"$group": {
+            "_id": None,
+            "total_links": {"$sum": 1},
+            "total_clicks": {"$sum": "$clicks"}
+        }},
+        {"$project": {"_id": 0}}
+    ]
+    stats = list(links_collection.aggregate(pipeline))
+    if not stats:
+        return {"total_links": 0, "total_clicks": 0}
+    return stats[0]
