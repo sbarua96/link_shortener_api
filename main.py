@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 # === CONFIGURATION: Your application's settings ===
 # IMPORTANT: Replace this with your actual MongoDB connection string!
-MONGO_URI = "mongodb+srv://<username>:<password>@cluster...mongodb.net/"
+MONGO_URI = "mongodb+srv://sbarua:batman123@cluster0.wnsbwvu.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 # This key should be kept secret. Generate a real one with: openssl rand -hex 32
 SECRET_KEY = "your-secret-key" 
 ALGORITHM = "HS256" # The algorithm used to sign the JWT
