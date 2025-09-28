@@ -10,6 +10,8 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
 from typing import List
+import string
+import random
 
 # === CONFIGURATION: Your application's settings ===
 # IMPORTANT: Replace this with your actual MongoDB connection string!
@@ -52,6 +54,10 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 # === PYDANTIC MODELS (Data Schemas) ===
+# Add these t classes in your Pydantic Models section
+
+# === PYDANTIC MODELS (Data Schemas) ===
+
 class UserCreate(BaseModel):
     """The data shape required to create a new user."""
     email: EmailStr
@@ -61,6 +67,10 @@ class Token(BaseModel):
     """The data shape of the token response after logging in."""
     access_token: str
     token_type: str
+
+class LinkCreate(BaseModel):
+    original_url: str
+
 class Link(BaseModel):
     """The data shape for a link object."""
     original_url: str
@@ -126,14 +136,33 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 # Add these two endpoints to your main.py file
 
+@app.post("/links", response_model=Link)
+def create_link(link: LinkCreate, current_user: dict = Depends(get_current_user)):
+    short_code = "".join(random.choices(string.ascii_letters + string.digits, k=6))
+    link_doc = {
+        "original_url": link.original_url,
+        "short_code": short_code,
+        "owner_email": current_user["email"],
+        "clicks": 0
+    }
+    try:
+        links_collection.insert_one(link_doc)
+        return link_doc
+    except DuplicateKeyError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not create unique short link. Please try again.")
+    
+    # Add this function right after your create_link function
+
 @app.get("/links", response_model=List[Link])
 def get_user_links(current_user: dict = Depends(get_current_user)):
     """
     Retrieves all links created by the currently authenticated user.
     """
+    # Find all links where the owner_email matches the current user's email
     links_cursor = links_collection.find(
-        {"owner_email": current_user["email"]}, # Filter: Only find links where the owner is the current user.
-        {"_id": 0, "owner_email": 0} # Projection: Clean up the output to match the Link model.
+        {"owner_email": current_user["email"]},
+        # Projection: Exclude fields we don't need in the response
+        {"_id": 0, "owner_email": 0} 
     )
     return list(links_cursor)
 
@@ -150,3 +179,33 @@ def delete_link(short_code: str, current_user: dict = Depends(get_current_user))
 
     links_collection.delete_one({"short_code": short_code})
     return # A 204 response has no body, so we return nothing.
+
+# Add this inside your FastAPI app
+
+@app.get("/stats/my-links")
+def get_my_link_stats(current_user: dict = Depends(get_current_user)):
+    # MongoDB Interview Point #3: Aggregation Pipeline
+    pipeline = [
+        # Stage 1: Match documents for the current user
+        {
+            "$match": {"owner_email": current_user["email"]}
+        },
+        # Stage 2: Group them and calculate statistics
+        {
+            "$group": {
+                "_id": None, # Group all matched documents into one
+                "total_links": {"$sum": 1},
+                "total_clicks": {"$sum": "$clicks"}
+            }
+        },
+        # Stage 3: Clean up the output
+        {
+            "$project": {
+                "_id": 0
+            }
+        }
+    ]
+    stats = list(links_collection.aggregate(pipeline))
+    if not stats:
+        return {"total_links": 0, "total_clicks": 0}
+    return stats[0]
